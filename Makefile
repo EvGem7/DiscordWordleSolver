@@ -1,4 +1,4 @@
 FLAGS := -Wall -Wextra -O3
 
-solver: main.c solver.c solver.h Makefile
+solver: main.c solver.c solver.h Makefile words.c
 	gcc $(FLAGS) main.c solver.c -o solver

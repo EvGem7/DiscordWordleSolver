@@ -6,8 +6,7 @@
 
 //#define DEBUG
 
-static Word words[MAX_WORDS] = {0};
-static uint32_t words_count = 0;
+#include "words.c"
 
 static Probe probes[MAX_PROBES] = {0};
 static uint32_t probes_count = 0;
@@ -184,21 +183,17 @@ size_t calc_possible_count(const WordArray words, Word guess, Word actual) {
 int compare_word_amount(const void* a, const void* b) {
     const WordAmount *wa = a;
     const WordAmount *wb = b;
-//    if (wa->amount == 0 && wb->amount == 0) return 0;
-//    if (wa->amount == 0) return +1;
-//    if (wb->amount == 0) return -1;
     return wa->amount - wb->amount;
 }
 
 Word guess_word(void) {
-    WordAmount guesses[MAX_WORDS] = {0};
+    WordAmount guesses[WORDS_COUNT] = {0};
 
-    Word possible_actuals[MAX_WORDS] = {0};
-    const WordArray all_words = { .arr = words, .size = words_count };
-    const ProbeArray all_probes = { .arr = probes, .size = probes_count };
-    const size_t filtered_count  = filter_words(possible_actuals, all_words, all_probes);
+    Word possible_actuals[WORDS_COUNT] = {0};
+    const WordArray words_array = { .arr = (Word*)WORDS, .size = WORDS_COUNT };
+    const ProbeArray probes_array = { .arr = probes, .size = probes_count };
+    const size_t filtered_count  = filter_words(possible_actuals, words_array, probes_array);
 
-//#ifdef DEBUG
     printf("Possible words: %zu\n", filtered_count);
     if (filtered_count < 100) {
         for (size_t i = 0; i < filtered_count; i++) {
@@ -206,12 +201,11 @@ Word guess_word(void) {
         }
         puts("");
     }
-//#endif
 
     const size_t pa_count = (filtered_count > 600) ? 600 : filtered_count;
 
-    for (size_t guess_i = 0; guess_i < words_count; guess_i++) {
-        const Word guess = words[guess_i];
+    for (size_t guess_i = 0; guess_i < WORDS_COUNT; guess_i++) {
+        const Word guess = WORDS[guess_i];
         size_t possible_count = 0;
         for (Word* pa = possible_actuals; pa < possible_actuals + pa_count; pa++) {
             const WordArray arr = { .arr = possible_actuals, .size = pa_count };
@@ -220,7 +214,7 @@ Word guess_word(void) {
         guesses[guess_i] = (WordAmount) { .word = guess, .amount = possible_count };
     }
 
-    qsort(guesses, words_count, sizeof(guesses[0]), compare_word_amount);
+    qsort(guesses, WORDS_COUNT, sizeof(guesses[0]), compare_word_amount);
 
 #ifdef DEBUG
     printf("calculated for guess = %.5s possible_count = %d\n", guesses[0].word.val, guesses[0].amount);
@@ -231,15 +225,6 @@ Word guess_word(void) {
 
 
 // not interesting bullshit
-bool is_word_valid(Word word) {
-    for (int i = 0; i < WORD_LEN; i++) {
-        if (word.val[i] < 'a' || word.val[i] > 'z') {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool is_result_valid(Word result) {
     for (int i = 0; i < WORD_LEN; i++) {
         if (result.val[i] != GRAY && result.val[i] != YELLOW && result.val[i] != GREEN) {
@@ -249,16 +234,8 @@ bool is_result_valid(Word result) {
     return true;
 }
 
-void save_word(Word word) {
-    words[words_count++] = word;
-}
-
 void save_probe(Probe probe) {
     probes[probes_count++] = probe;
-}
-
-int get_words_count(void) {
-    return words_count;
 }
 
 int get_probes_count(void) {
