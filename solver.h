@@ -4,8 +4,10 @@
 #include <stdint.h>
 
 #define WORD_LEN 5
-#define MAX_WORDS 100000
+#define MAX_WORDS 20000
 #define MAX_PROBES 128
+
+typedef char Color;
 #define GREEN '3'
 #define YELLOW '2'
 #define GRAY '1'
@@ -19,15 +21,14 @@ typedef struct {
     Word result;
 } Probe;
 
-extern Word words[MAX_WORDS];
-extern uint32_t words_count;
-
-extern Probe probes[MAX_PROBES];
-extern uint32_t probes_count;
-
-
 bool is_word_valid(Word word);
-bool is_result_valid(const char *result);
+bool is_result_valid(Word result);
+
+void save_word(Word word);
+void save_probe(Probe probe);
+
+int get_words_count(void);
+int get_probes_count(void);
 
 Word guess_word(void);
 

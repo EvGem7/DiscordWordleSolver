@@ -17,7 +17,7 @@ bool read_words(void) {
     for (int ch = fgetc(file); ch != EOF; ch = fgetc(file)) {
         if ('\n' == ch) {
             if (WORD_LEN == word_size && is_word_valid(word)) {
-                memcpy(words + words_count++, &word, sizeof(word));
+                save_word(word);
             }
             word_size = 0;
             continue;
@@ -36,28 +36,29 @@ int main(void) {
         fprintf(stderr, "cannot read words\n");
         return -1;
     }
-    printf("%"PRIu32" words were read\n", words_count);
+    printf("%"PRIu32" words were read\n", get_words_count());
 
-    while (probes_count < MAX_PROBES) {
+    int probe_num = 1;
+    while (get_probes_count() < MAX_PROBES) {
         Word guess = guess_word();
-        printf("%.*s\n", WORD_LEN, guess.val);
+        printf("Probe #%d:\n%.*s\n", probe_num++, WORD_LEN, guess.val);
 
         while (true) {
-            char result[WORD_LEN + 2];
-            if (NULL == fgets(result, sizeof(result), stdin)) {
+            char input[WORD_LEN + 2];
+            if (NULL == fgets(input, sizeof(input), stdin)) {
                 return 0;
             }
+            Word result = *(Word*)input;
             if (is_result_valid(result)) {
-                Probe probe = { .guess = guess };
-                memcpy(probe.result.val, result, WORD_LEN);
-                probes[probes_count++] = probe;
+                Probe probe = { .guess = guess, .result = result };
+                save_probe(probe);
                 break;
             } else {
                 printf("expected result: 1 - gray, 2 - yellow, 3 - green\n");
             }
         }
     }
-
-    return 0;
+    puts("Too many probes!");
+    return -1;
 }
 
