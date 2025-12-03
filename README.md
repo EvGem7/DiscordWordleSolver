@@ -1,1 +1,1 @@
-Dump solver of the Wordle game available in Discord
+Dumb solver of the Wordle game available in Discord
