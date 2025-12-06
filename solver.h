@@ -20,6 +20,9 @@ typedef struct {
     Word result;
 } Probe;
 
+bool Word_equals(Word a, Word b);
+Word Word_from_str(const char* str);
+
 bool is_result_valid(Word result);
 
 void save_probe(Probe probe);
@@ -27,5 +30,5 @@ int get_probes_count(void);
 
 Word guess_word(void);
 
-#endif//SOLVER_H_ 
+#endif //SOLVER_H_ 
 
