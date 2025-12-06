@@ -7,7 +7,7 @@ int test_wordle(Word wordle) {
     while (get_probes_count() < MAX_PROBES) {
         Word guess = guess_word();
         if (Word_equals(wordle, guess)) {
-            return get_probes_count();
+            return get_probes_count() + 1;
         }
         Word result = generate_result(guess, wordle);
         save_probe((Probe) { .guess = guess, .result = result });
