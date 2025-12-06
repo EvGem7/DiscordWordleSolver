@@ -7,6 +7,12 @@
 #include "solver.h"
 #include "words.c"
 
+#ifdef DEBUG
+#define LOG_DEBUG(...) solver_printf(__VA_ARGS__)
+#else
+#define LOG_DEBUG(...)
+#endif
+
 static Probe PROBES[MAX_PROBES] = {0};
 static uint32_t PROBES_COUNT = 0;
 
@@ -181,89 +187,158 @@ static int compare_word_amount(const void* a, const void* b) {
 }
 
 
-#define THREADS_COUNT 16
+
+// THREADING STUFF
+#define WORKERS_COUNT 16
 
 typedef struct {
     size_t guess_from;
     size_t guess_to;
-    WordArray possible_actuals;
-    WordAmount* guesses;
-} ThreadInfo;
+} WorkerInfo;
 
-static void* thread_routine(void* arg) {
-    ThreadInfo* info = arg;
-    const Word* possible_actuals = info->possible_actuals.arr;
-    size_t pa_count = info->possible_actuals.size;
-    for (size_t guess_i = info->guess_from; guess_i < info->guess_to; guess_i++) {
-        size_t possible_count = 0;
-        for (const Word* pa = possible_actuals; pa < possible_actuals + pa_count; pa++) {
-            WordArray arr = { .arr = possible_actuals, .size = pa_count };
-            possible_count += get_possible_count(arr, guess_i, *pa);
+static pthread_mutex_t  MUTEX                   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t   WORK_AVAILABLE          = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t   WORKER_READY            = PTHREAD_COND_INITIALIZER;
+static uint8_t          READY_WORKERS           = 0;
+static bool             ARE_WORKERS_INITIALIZED = false;
+static pthread_t        WORKERS[WORKERS_COUNT];
+static WorkerInfo       WORKERS_INFO[WORKERS_COUNT];
+
+static WordAmount       GUESSES[WORDS_COUNT];
+static Word             POSSIBLE_ACTUALS[WORDS_COUNT];
+static size_t           PA_COUNT = 0;
+
+static void lock_mutex() {
+    if (pthread_mutex_lock(&MUTEX) != 0) {
+        fprintf(stderr, "cannot lock mutex\n");
+        exit(-1);
+    }
+}
+
+static void unlock_mutex() {
+    if (pthread_mutex_unlock(&MUTEX) != 0) {
+        fprintf(stderr, "cannot unlock mutex\n");
+        exit(-1);
+    }
+}
+
+static void wait_for_cond(pthread_cond_t* cond) {
+    if (pthread_cond_wait(cond, &MUTEX) != 0) {
+        fprintf(stderr, "failed waiting for condition\n");
+        exit(-1);
+    }
+}
+
+static void signal_cond(pthread_cond_t* cond) {
+    if (pthread_cond_broadcast(cond) != 0) {
+        fprintf(stderr, "failed signal condition\n");
+        exit(-1);
+    }
+}
+
+static void* worker_routine(void* arg) {
+    WorkerInfo* info = arg;
+    while (true) {
+        lock_mutex();
+        READY_WORKERS++;
+        LOG_DEBUG("worker_routine(#%05zu) sending WORKER_READY READY_WORKERS = %d\n", info->guess_from, READY_WORKERS);
+        signal_cond(&WORKER_READY);
+        LOG_DEBUG("worker_routine(#%05zu) waiting for WORK_AVAILABLE\n", info->guess_from);
+        wait_for_cond(&WORK_AVAILABLE);
+        LOG_DEBUG("worker_routine(#%05zu) starting work READY_WORKERS = %d\n", info->guess_from, READY_WORKERS);
+        unlock_mutex();
+
+        for (size_t guess_i = info->guess_from; guess_i < info->guess_to; guess_i++) {
+            size_t possible_count = 0;
+            for (const Word* pa = POSSIBLE_ACTUALS; pa < POSSIBLE_ACTUALS + PA_COUNT; pa++) {
+                WordArray arr = { .arr = POSSIBLE_ACTUALS, .size = PA_COUNT };
+                possible_count += get_possible_count(arr, guess_i, *pa);
+            }
+            GUESSES[guess_i] = (WordAmount) { .word = WORDS[guess_i], .amount = possible_count };
         }
-        info->guesses[guess_i] = (WordAmount) { .word = WORDS[guess_i], .amount = possible_count };
     }
     return NULL;
 }
 
+static void wait_workers_idle(void) {
+    while (true) {
+        lock_mutex();
+        LOG_DEBUG("wait_workers_idle() check condition; READY_WORKERS = %d\n", READY_WORKERS);
+        if (READY_WORKERS >= WORKERS_COUNT) {
+            unlock_mutex();
+            break;
+        }
+        LOG_DEBUG("wait_workers_idle() waiting for WORKER_READY; READY_WORKERS = %d\n", READY_WORKERS);
+        wait_for_cond(&WORKER_READY);
+        LOG_DEBUG("wait_workers_idle() received for WORKER_READY; READY_WORKERS = %d\n", READY_WORKERS);
+        unlock_mutex();
+    }
+}
+
+static void init_workers(void) {
+    if (ARE_WORKERS_INITIALIZED) return;
+    for (int i = 0; i < WORKERS_COUNT; i++) {
+        int last_additional = (i == WORKERS_COUNT - 1) ? (WORDS_COUNT % WORKERS_COUNT) : 0;
+        size_t guess_from = WORDS_COUNT / WORKERS_COUNT * i;
+        size_t guess_to = guess_from + WORDS_COUNT / WORKERS_COUNT + last_additional;
+        WORKERS_INFO[i] = (WorkerInfo) {
+            .guess_from = guess_from,
+            .guess_to = guess_to,
+        };
+        if (pthread_create(WORKERS + i, NULL, worker_routine, WORKERS_INFO + i) != 0) {
+            fprintf(stderr, "cannot create worker thread\n");
+            exit(-1);
+        }
+    }
+    wait_workers_idle();
+    ARE_WORKERS_INITIALIZED = true;
+}
+// THREADING STUFF END
+
+
+
 Word guess_word(void) {
     if (get_probes_count() == 0) {
         solver_printf("Possible words: %zu\n", WORDS_COUNT);
-        return Word_from_str("lares");
+        return Word_from_str("lares"); // precomputed
     }
 
-    WordAmount guesses[WORDS_COUNT] = {0};
-
-    Word possible_actuals[WORDS_COUNT] = {0};
-    const size_t pa_count  = filter_words(
-            possible_actuals,
+    PA_COUNT = filter_words(
+            POSSIBLE_ACTUALS,
             (WordArray)  { .arr = WORDS,  .size = WORDS_COUNT },
             (ProbeArray) { .arr = PROBES, .size = PROBES_COUNT });
-    solver_printf("Possible words: %zu\n", pa_count);
+    solver_printf("Possible words: %zu\n", PA_COUNT);
 
-    if (pa_count < 100) {
-        for (size_t i = 0; i < pa_count; i++) {
-            solver_printf("%.*s ", WORD_LEN, possible_actuals[i].val);
+    if (PA_COUNT < 100) {
+        for (size_t i = 0; i < PA_COUNT; i++) {
+            solver_printf("%.*s ", WORD_LEN, POSSIBLE_ACTUALS[i].val);
         }
         solver_printf("\n");
     }
 
     clear_cache();
 
-    pthread_t threads[THREADS_COUNT] = {0};
-    ThreadInfo info_arr[THREADS_COUNT] = {0};
-    for (int i = 0; i < THREADS_COUNT; i++) {
-        int last_additional = (i == THREADS_COUNT - 1) ? (WORDS_COUNT % THREADS_COUNT) : 0;
-        size_t guess_from = WORDS_COUNT / THREADS_COUNT * i;
-        size_t guess_to = guess_from + WORDS_COUNT / THREADS_COUNT + last_additional;
-        info_arr[i] = (ThreadInfo) {
-            .guess_from = guess_from,
-            .guess_to = guess_to,
-            .possible_actuals = (WordArray) { .arr = possible_actuals, .size = pa_count },
-            .guesses = guesses,
-        };
-        if (pthread_create(threads + i, NULL, thread_routine, info_arr + i) != 0) {
-            fprintf(stderr, "cannot create thread\n");
-            exit(-1);
-        }
-    }
-    for (int i = 0; i < THREADS_COUNT; i++) {
-        if (pthread_join(threads[i], NULL) != 0) {
-            fprintf(stderr, "cannot join thread\n");
-            exit(-1);
-        }
-    }
+    init_workers();
+    lock_mutex();
+    LOG_DEBUG("guess_word() sending WORK_AVAILABLE; READY_WORKERS = %d\n", READY_WORKERS);
+    signal_cond(&WORK_AVAILABLE);
+    READY_WORKERS = 0;
+    unlock_mutex();
+    LOG_DEBUG("guess_word() waiting for workers idle; READY_WORKERS = %d\n", READY_WORKERS);
+    wait_workers_idle();
+    LOG_DEBUG("guess_word() starting sorting; READY_WORKERS = %d\n", READY_WORKERS);
 
-    qsort(guesses, WORDS_COUNT, sizeof(guesses[0]), compare_word_amount);
+    qsort(GUESSES, WORDS_COUNT, sizeof(GUESSES[0]), compare_word_amount);
 
     for (size_t guess_i = 0; guess_i < WORDS_COUNT; guess_i++) {
-        if (guesses[guess_i].amount > guesses[0].amount) break;
-        for (size_t pa_i = 0; pa_i < pa_count; pa_i++) {
-            if (Word_equals(guesses[guess_i].word, possible_actuals[pa_i])) {
-                return guesses[guess_i].word;
+        if (GUESSES[guess_i].amount > GUESSES[0].amount) break;
+        for (size_t pa_i = 0; pa_i < PA_COUNT; pa_i++) {
+            if (Word_equals(GUESSES[guess_i].word, POSSIBLE_ACTUALS[pa_i])) {
+                return GUESSES[guess_i].word;
             }
         }
     }
-    return guesses[0].word;
+    return GUESSES[0].word;
 }
 
 // cache stuff
