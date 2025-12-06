@@ -99,6 +99,7 @@ static Word generate_result(Word guess, Word actual) {
             continue;
         }
         for (int yc_i = 0; yc_i < WORD_LEN; yc_i++) {
+            // TODO: check if guess.val[yc_i] != yellow_check.val[yc_i] needs to be replaced with guess.val[yc_i] != actual.val[yc_i]
             if (guess.val[result_i] == yellow_check.val[yc_i] && guess.val[yc_i] != yellow_check.val[yc_i]) {
                 result.val[result_i] = YELLOW;
                 yellow_check.val[yc_i] = 0;
