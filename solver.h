@@ -27,8 +27,11 @@ bool is_result_valid(Word result);
 
 void save_probe(Probe probe);
 int get_probes_count(void);
+void reset_probes(void);
 
 Word guess_word(void);
+
+extern int (*solver_printf)(const char *restrict format, ...);
 
 #endif //SOLVER_H_ 
 

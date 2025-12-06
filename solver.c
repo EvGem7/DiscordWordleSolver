@@ -207,7 +207,7 @@ static void* thread_routine(void* arg) {
 
 Word guess_word(void) {
     if (get_probes_count() == 0) {
-        printf("Possible words: %zu\n", WORDS_COUNT);
+        solver_printf("Possible words: %zu\n", WORDS_COUNT);
         return Word_from_str("lares");
     }
 
@@ -218,13 +218,13 @@ Word guess_word(void) {
             possible_actuals,
             (WordArray)  { .arr = WORDS,  .size = WORDS_COUNT },
             (ProbeArray) { .arr = PROBES, .size = PROBES_COUNT });
-    printf("Possible words: %zu\n", pa_count);
+    solver_printf("Possible words: %zu\n", pa_count);
 
     if (pa_count < 100) {
         for (size_t i = 0; i < pa_count; i++) {
-            printf("%.*s ", WORD_LEN, possible_actuals[i].val);
+            solver_printf("%.*s ", WORD_LEN, possible_actuals[i].val);
         }
-        puts("");
+        solver_printf("\n");
     }
 
     clear_cache();
@@ -321,6 +321,10 @@ int get_probes_count(void) {
     return PROBES_COUNT;
 }
 
+void reset_probes(void) {
+    PROBES_COUNT = 0;
+}
+
 
 bool Word_equals(Word a, Word b) {
     for (int i = 0; i < WORD_LEN; i++) {
@@ -349,3 +353,6 @@ static void CharSet_add(CharSet *set, char ch) {
 static void CharSet_remove(CharSet *set, char ch) {
     *set &= ~(1 << (ch - 'a'));
 }
+
+int (*solver_printf)(const char *restrict format, ...) = printf;
+
