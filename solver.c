@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <inttypes.h>
+#include <stdbool.h>
 
 #include "solver.h"
 #include "words.c"
