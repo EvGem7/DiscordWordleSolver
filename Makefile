@@ -5,3 +5,7 @@ solver: main.c solver.c solver.h words.c
 
 test: test.c solver.c solver.h words.c
 	cc $(_FLAGS) $(FLAGS) test.c -o test
+
+.PHONY: clean
+clean:
+	rm -rfv test solver

@@ -191,7 +191,9 @@ static int compare_word_amount(const void* a, const void* b) {
 
 
 // THREADING STUFF
+#ifndef WORKERS_COUNT
 #define WORKERS_COUNT 16
+#endif
 
 typedef struct {
     size_t guess_from;
@@ -279,6 +281,7 @@ static void wait_workers_idle(void) {
 
 static void init_workers(void) {
     if (ARE_WORKERS_INITIALIZED) return;
+    LOG_DEBUG("init_workers() WORKERS_COUNT = %d\n", WORKERS_COUNT);
     for (int i = 0; i < WORKERS_COUNT; i++) {
         int last_additional = (i == WORKERS_COUNT - 1) ? (WORDS_COUNT % WORKERS_COUNT) : 0;
         size_t guess_from = WORDS_COUNT / WORKERS_COUNT * i;
