@@ -1,8 +1,9 @@
+#include <inttypes.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <inttypes.h>
 
 #include "solver.h"
 #include "words.c"
@@ -17,15 +18,17 @@ static Probe PROBES[MAX_PROBES] = {0};
 static uint32_t PROBES_COUNT = 0;
 
 
-static uint64_t count_cache[WORDS_COUNT][243]; // 243 = 3 ** 5; 3 stands for 3 possible result colors
+#define RESULT_MAP_SIZE 243 // 243 = 3 ** 5; 3 stands for 3 possible result colors
+typedef union {
+    uint64_t u64;
+    double f64;
+} ResultMapValue;
 
-static int get_cached_count_index(Word result);
-static uint64_t get_cached_count(size_t guess_index, Word result);
-static void put_cached_count(size_t guess_index, Word result, uint64_t count);
-static void clear_cache(void);
+typedef struct {
+    ResultMapValue values[RESULT_MAP_SIZE]; 
+} ResultMap;
 
-#define CACHE_MISS (~(uint64_t)(0))
-
+static int              ResultMap_get_index(Word result);
 
 
 typedef struct {
@@ -40,9 +43,8 @@ typedef struct {
 
 typedef struct {
     Word word;
-    int amount;
-} WordAmount;
-
+    double entropy;
+} WordEntropy;
 
 
 Word generate_result(Word guess, Word actual) {
@@ -68,55 +70,28 @@ Word generate_result(Word guess, Word actual) {
     return result;
 }
 
-static bool word_matches(Word word, ProbeArray probes) {
-    for (const Probe *probe = probes.arr; probe < probes.arr + probes.size; probe++) {
-        Word result = generate_result(probe->guess, word);
-        if (!Word_equals(probe->result, result)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static size_t filter_words(Word *restrict dst, WordArray words, ProbeArray probes) {
     size_t count = 0;
     for (const Word *w = words.arr; w < words.arr + words.size; w++) {
-        if (word_matches(*w, probes)) {
+        bool matches = true;
+        for (const Probe *probe = probes.arr; probe < probes.arr + probes.size; probe++) {
+            Word result = generate_result(probe->guess, *w);
+            if (!Word_equals(probe->result, result)) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
             dst[count++] = *w;
         }
     }
     return count;
 }
 
-static size_t count_filtered_words(WordArray words, ProbeArray probes) {
-    size_t count = 0;
-    for (const Word *w = words.arr; w < words.arr + words.size; w++) {
-        if (word_matches(*w, probes)) {
-            count++;
-        }
-    }
-    return count;
-}
-
-static uint64_t get_possible_count(WordArray words, size_t guess_index, Word actual) {
-    Word guess = WORDS[guess_index];
-    Word result = generate_result(guess, actual);
-
-    uint64_t cached = get_cached_count(guess_index, result);
-    if (CACHE_MISS != cached) {
-        return cached;
-    }
-
-    Probe probe = { .guess = guess, .result = result };
-    uint64_t count = count_filtered_words(words, (ProbeArray) { .arr = &probe, .size = 1 });
-    put_cached_count(guess_index, result, count);
-    return count;
-}
-
-static int compare_word_amount(const void* a, const void* b) {
-    const WordAmount *wa = a;
-    const WordAmount *wb = b;
-    return wa->amount - wb->amount;
+static int compare_word_entropy(const void* a, const void* b) {
+    const WordEntropy *wa = a;
+    const WordEntropy *wb = b;
+    return ((wa->entropy < wb->entropy) ? 1 : 0) - ((wa->entropy > wb->entropy) ? 1 : 0);
 }
 
 
@@ -137,7 +112,7 @@ static bool             ARE_WORKERS_INITIALIZED = false;
 static pthread_t        WORKERS[WORKERS_COUNT];
 static WorkerInfo       WORKERS_INFO[WORKERS_COUNT];
 
-static WordAmount       GUESSES[WORDS_COUNT];
+static WordEntropy      GUESSES[WORDS_COUNT];
 static Word             POSSIBLE_ACTUALS[WORDS_COUNT];
 static size_t           PA_COUNT = 0;
 
@@ -182,12 +157,20 @@ static void* worker_routine(void* arg) {
         unlock_mutex();
 
         for (size_t guess_i = info->guess_from; guess_i < info->guess_to; guess_i++) {
-            size_t possible_count = 0;
+            ResultMap map = {0};
+            Word guess = WORDS[guess_i];
             for (const Word* pa = POSSIBLE_ACTUALS; pa < POSSIBLE_ACTUALS + PA_COUNT; pa++) {
-                WordArray arr = { .arr = POSSIBLE_ACTUALS, .size = PA_COUNT };
-                possible_count += get_possible_count(arr, guess_i, *pa);
+                Word result = generate_result(guess, *pa);
+                map.values[ResultMap_get_index(result)].u64++;
             }
-            GUESSES[guess_i] = (WordAmount) { .word = WORDS[guess_i], .amount = possible_count };
+            double entropy = 0.0;
+            for (int i = 0; i < RESULT_MAP_SIZE; i++) {
+                uint64_t count = map.values[i].u64;
+                if (count <= 0) continue;
+                double p = (double) count / PA_COUNT;
+                entropy += -p * log2(p);
+            }
+            GUESSES[guess_i] = (WordEntropy) { .word = WORDS[guess_i], .entropy = entropy };
         }
     }
     return NULL;
@@ -231,10 +214,10 @@ static void init_workers(void) {
 
 
 Word guess_word(void) {
-    if (get_probes_count() == 0) {
-        solver_printf("Possible words: %zu\n", WORDS_COUNT);
-        return Word_from_str("lares"); // precomputed
-    }
+//    if (get_probes_count() == 0) {
+//        solver_printf("Possible words: %zu\n", WORDS_COUNT);
+//        return Word_from_str("tares"); // precomputed
+//    }
 
     PA_COUNT = filter_words(
             POSSIBLE_ACTUALS,
@@ -249,8 +232,6 @@ Word guess_word(void) {
         solver_printf("\n");
     }
 
-    clear_cache();
-
     init_workers();
     lock_mutex();
     LOG_DEBUG("guess_word() sending WORK_AVAILABLE; READY_WORKERS = %d\n", READY_WORKERS);
@@ -261,10 +242,10 @@ Word guess_word(void) {
     wait_workers_idle();
     LOG_DEBUG("guess_word() starting sorting; READY_WORKERS = %d\n", READY_WORKERS);
 
-    qsort(GUESSES, WORDS_COUNT, sizeof(GUESSES[0]), compare_word_amount);
+    qsort(GUESSES, WORDS_COUNT, sizeof(GUESSES[0]), compare_word_entropy);
 
     for (size_t guess_i = 0; guess_i < WORDS_COUNT; guess_i++) {
-        if (GUESSES[guess_i].amount > GUESSES[0].amount) break;
+        if (GUESSES[guess_i].entropy > GUESSES[0].entropy) break;
         for (size_t pa_i = 0; pa_i < PA_COUNT; pa_i++) {
             if (Word_equals(GUESSES[guess_i].word, POSSIBLE_ACTUALS[pa_i])) {
                 return GUESSES[guess_i].word;
@@ -275,7 +256,7 @@ Word guess_word(void) {
 }
 
 // cache stuff
-static int get_cached_count_index(Word result) {
+static int ResultMap_get_index(Word result) {
     int index = 0;
     for (int i = 0; i < WORD_LEN; i++) {
         int value;
@@ -291,22 +272,6 @@ static int get_cached_count_index(Word result) {
         index += value;
     }
     return index;
-}
-
-static uint64_t get_cached_count(size_t guess_index, Word result) {
-    return count_cache[guess_index][get_cached_count_index(result)];
-}
-
-static void put_cached_count(size_t guess_index, Word result, uint64_t count) {
-    count_cache[guess_index][get_cached_count_index(result)] = count;
-}
-
-static void clear_cache(void) {
-    for (size_t i = 0; i < sizeof(count_cache) / sizeof(count_cache[0]); i++) {
-        for (size_t j = 0; j < sizeof(count_cache[0]) / sizeof(count_cache[0][0]); j++) {
-            count_cache[i][j] = CACHE_MISS;
-        }
-    }
 }
 // cache stuff END
 
@@ -344,6 +309,7 @@ bool Word_equals(Word a, Word b) {
 Word Word_from_str(const char* str) {
     return *(Word*)str;
 }
+
 
 int (*solver_printf)(const char *restrict format, ...) = printf;
 

@@ -1,6 +1,7 @@
 #include <stdio.h>
 
-#include "solver.c"
+#include "solver.h"
+#include "words.c"
 
 int test_wordle(Word wordle) {
     reset_probes();

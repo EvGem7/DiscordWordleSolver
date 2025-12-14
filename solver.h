@@ -29,6 +29,8 @@ void save_probe(Probe probe);
 int get_probes_count(void);
 void reset_probes(void);
 
+Word generate_result(Word guess, Word actual);
+
 Word guess_word(void);
 
 extern int (*solver_printf)(const char *restrict format, ...);

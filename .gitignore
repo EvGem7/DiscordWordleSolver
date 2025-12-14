@@ -1,2 +1,7 @@
 solver
-
+solver_entropy
+test
+test_entropy
+generate_result_test
+*.json
+!words.json
